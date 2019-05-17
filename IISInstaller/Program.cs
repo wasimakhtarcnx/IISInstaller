@@ -1,5 +1,8 @@
 ﻿using Microsoft.Web.Administration;
 using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
 
 namespace IISInstaller
 {
@@ -8,37 +11,23 @@ namespace IISInstaller
         static ServerManager serverMgr = new ServerManager();
         static void Main(string[] args)
         {
-            try
-            {
+            Console.Out.WriteLine("Launching IIS Express...");
+            IISExpress iis1 = IISExpress.Start(
+                @"C:\Users\Administrator\Documents\IISExpress\config\applicationhost.config",
+                @"WebSite1(1)",
+                @"Clr4IntegratedAppPool");
 
-                string strWebsitename = "NCSTC"; // abc
-                string strApplicationPool = "DefaultAppPool";  // set your deafultpool :4.0 in IIS
-                string strhostname = "NCSTC.com"; //abc.com
-                string stripaddress = "*";// ip address
-                string bindinginfo = stripaddress + ":80:" + strhostname;
 
-                //check if website name already exists in IIS
-                Boolean bWebsite = IsWebsiteExists(strWebsitename);
-                if (!bWebsite)
-                {
-                    Site mySite = serverMgr.Sites.Add(strWebsitename.ToString(), "http", bindinginfo, "C:inetpubwwwrootyourWebsite");
-                    mySite.ApplicationDefaults.ApplicationPoolName = strApplicationPool;
-                    mySite.TraceFailedRequestsLogging.Enabled = true;
-                    mySite.TraceFailedRequestsLogging.Directory = "C:inetpubcustomfoldersite";
-                    serverMgr.CommitChanges();
-                    Console.WriteLine("New website  " + strWebsitename + " added sucessfully");
+            IISExpress iis2 = IISExpress.Start(
+                @"C:\Users\Administrator\Documents\IISExpress\config\applicationhost2.config",
+                @"WebSite1(1)",
+                @"Clr4IntegratedAppPool");
 
-                }
-                else
-                {
-                    Console.WriteLine("Name should be unique, " + strWebsitename + "  is already exists. ");
+            Console.Out.WriteLine("Press ENTER to kill");
+            Console.In.ReadLine();
 
-                }
-            }
-            catch (Exception ae)
-            {
-                Console.WriteLine(ae.Message);
-            }
+            iis1.Stop();
+            iis2.Stop();
         }
         public static bool IsWebsiteExists(string strWebsitename)
         {
@@ -57,6 +46,90 @@ namespace IISInstaller
                 }
             }
             return flagset;
+        }
+    }
+
+    class IISExpress
+    {
+        internal class NativeMethods
+        {
+            // Methods
+            [DllImport("user32.dll", SetLastError = true)]
+            internal static extern IntPtr GetTopWindow(IntPtr hWnd);
+            [DllImport("user32.dll", SetLastError = true)]
+            internal static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+            [DllImport("user32.dll", SetLastError = true)]
+            internal static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint lpdwProcessId);
+            [DllImport("user32.dll", SetLastError = true)]
+            internal static extern bool PostMessage(HandleRef hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+        }
+
+        public static void SendStopMessageToProcess(int PID)
+        {
+            try
+            {
+                for (IntPtr ptr = NativeMethods.GetTopWindow(IntPtr.Zero); ptr != IntPtr.Zero; ptr = NativeMethods.GetWindow(ptr, 2))
+                {
+                    uint num;
+                    NativeMethods.GetWindowThreadProcessId(ptr, out num);
+                    if (PID == num)
+                    {
+                        HandleRef hWnd = new HandleRef(null, ptr);
+                        NativeMethods.PostMessage(hWnd, 0x12, IntPtr.Zero, IntPtr.Zero);
+                        return;
+                    }
+                }
+            }
+            catch (ArgumentException)
+            {
+            }
+        }
+
+        const string IIS_EXPRESS = @"C:\Program Files\IIS Express\iisexpress.exe";
+        const string CONFIG = "config";
+        const string SITE = "site";
+        const string APP_POOL = "apppool";
+
+        Process process;
+
+        IISExpress(string config, string site, string apppool)
+        {
+            Config = config;
+            Site = site;
+            AppPool = apppool;
+
+            StringBuilder arguments = new StringBuilder();
+            if (!string.IsNullOrEmpty(Config))
+                arguments.AppendFormat("/{0}:{1} ", CONFIG, Config);
+
+            if (!string.IsNullOrEmpty(Site))
+                arguments.AppendFormat("/{0}:{1} ", SITE, Site);
+
+            if (!string.IsNullOrEmpty(AppPool))
+                arguments.AppendFormat("/{0}:{1} ", APP_POOL, AppPool);
+
+            process = Process.Start(new ProcessStartInfo()
+            {
+                FileName = IIS_EXPRESS,
+                Arguments = arguments.ToString(),
+                RedirectStandardOutput = true,
+                UseShellExecute = false
+            });
+        }
+
+        public string Config { get; protected set; }
+        public string Site { get; protected set; }
+        public string AppPool { get; protected set; }
+
+        public static IISExpress Start(string config, string site, string apppool)
+        {
+            return new IISExpress(config, site, apppool);
+        }
+
+        public void Stop()
+        {
+            SendStopMessageToProcess(process.Id);
+            process.Close();
         }
     }
 }
